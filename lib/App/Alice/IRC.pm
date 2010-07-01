@@ -602,13 +602,15 @@ sub nick_avatar {
     if ($info->{real} =~ /([^<\s]+@[^\s>]+\.[^\s>]+)/) {
       my $email = $1;
       return "http://www.gravatar.com/avatar/"
-           . md5_hex($email) . "?s=32&amp;r=x";
+           . md5_hex($email) . "?s=32&r=x";
     }
     elsif ($info->{real} =~ /(https?:\/\/\S+(?:jpe?g|png|gif))/) {
       return $1;
     }
     else {
-      return undef;
+      my $email = $nick . "@" . $info->{server};
+      return "http://www.gravatar.com/avatar/"
+           . md5_hex($email) . "?s=32&r=x&default=identicon";
     }
   }
 }

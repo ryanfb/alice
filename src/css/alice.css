@@ -337,7 +337,7 @@ ul.messages li.consecutive div.left {
 
 div.left {
   float: left;
-  width: 127px;
+  width: 38px;
   font-weight: bold;
   text-align: right;
   padding: 4px 0;
@@ -409,7 +409,7 @@ li.self div.timehint {
 }
 
 div.msg {
-  margin-left: 132px;
+  margin-left: 43px;
   padding: 3px 5px;
   word-wrap: break-word;
   -khtml-line-break: after-white-space;
