@@ -95,6 +95,7 @@ Alice.Application = Class.create({
 
   toggleConfig: function(e) {
     this.connection.getConfig(function (transport) {
+      alice.activeWindow().input.disabled = true;
       $('container').insert(transport.responseText);
     }.bind(this));
     
@@ -103,6 +104,7 @@ Alice.Application = Class.create({
   
   togglePrefs: function(e) {
     this.connection.getPrefs(function (transport) {
+      alice.activeWindow().input.disabled = true;
       $('container').insert(transport.responseText);
     }.bind(this));
     
@@ -196,6 +198,19 @@ Alice.Application = Class.create({
     var id = nextTab.id.replace('_tab','');
     if (id != active.id) {
       this.getWindow(id).focus();
+    }
+  },
+
+  nextUnreadWindow: function() {
+    var active = this.activeWindow();
+    var tabs = active.tab.nextSiblings().concat(active.tab.previousSiblings());
+    var unread = tabs.find(function(tab) {return tab.hasClassName("unread")});
+
+    if (unread) {
+      var id = unread.id.replace("_tab","");
+      if (id) {
+        this.getWindow(id).focus();
+      }
     }
   },
   

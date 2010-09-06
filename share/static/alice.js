@@ -9863,19 +9863,38 @@ Object.extend(Alice, {
 		  return false;
 		},
 
+    addNick: function (nick) {
+      var nick = prompt("Enter a nick.");
+      if (nick)
+        $('monospace_nicks').insert("<option value=\""+nick+"\">"+nick+"</option>");
+      return false;
+    },
+
+    removeNicks: function (nick) {
+      $A($('monospace_nicks').options).each(function (option) {
+        if (option.selected) option.remove()});
+      return false;
+    },
+
     remove: function() {
+      alice.windows().each(function(win) {
+        win.input.disabled = false;
+      });
       $('prefs').remove();
     },
 
     submit: function(form) {
-			var options = {highlights: []};
+      var options = {highlights: [], monospace_nicks: []};
 
-			["images", "avatars", "alerts"].each(function (pref) {
-			  options[pref] = $(pref).checked ? "show" : "hide";
-			});
-
-			$A($("highlights").options).each(function(option) {
+      ["images", "avatars", "alerts"].each(function (pref) {
+        options[pref] = $(pref).checked ? "show" : "hide";
+      });
+      $A($("highlights").options).each(function(option) {
         options.highlights.push(option.value);
+      });
+
+      $A($("monospace_nicks").options).each(function(option) {
+        options.monospace_nicks.push(option.value);
       });
 
       ["style", "timeformat"].each(function(pref) {
@@ -9983,10 +10002,17 @@ Object.extend(Alice, {
       new Ajax.Request('/save', {
         method: 'get',
         parameters: form.serialize(),
-        onSuccess: function () {$('servers').remove()}
+        onSuccess: function(){Alice.connections.remove()}
       });
 
       return false;
+    },
+
+    remove: function() {
+      alice.windows().each(function(win) {
+        win.input.disabled = false;
+      });
+      $('servers').remove();
     },
 
     serverConnection: function(alias, action) {
@@ -10108,6 +10134,7 @@ Alice.Application = Class.create({
 
   toggleConfig: function(e) {
     this.connection.getConfig(function (transport) {
+      alice.activeWindow().input.disabled = true;
       $('container').insert(transport.responseText);
     }.bind(this));
 
@@ -10116,6 +10143,7 @@ Alice.Application = Class.create({
 
   togglePrefs: function(e) {
     this.connection.getPrefs(function (transport) {
+      alice.activeWindow().input.disabled = true;
       $('container').insert(transport.responseText);
     }.bind(this));
 
@@ -10209,6 +10237,19 @@ Alice.Application = Class.create({
     var id = nextTab.id.replace('_tab','');
     if (id != active.id) {
       this.getWindow(id).focus();
+    }
+  },
+
+  nextUnreadWindow: function() {
+    var active = this.activeWindow();
+    var tabs = active.tab.nextSiblings().concat(active.tab.previousSiblings());
+    var unread = tabs.find(function(tab) {return tab.hasClassName("unread")});
+
+    if (unread) {
+      var id = unread.id.replace("_tab","");
+      if (id) {
+        this.getWindow(id).focus();
+      }
     }
   },
 
@@ -10340,6 +10381,10 @@ Alice.Connection = Class.create({
     this.reconnecting = false;
   },
 
+  gotoLogin: function() {
+    window.location = "/login";
+  },
+
   closeConnection: function() {
     this.aborting = true;
     if (this.request && this.request.transport)
@@ -10361,6 +10406,7 @@ Alice.Connection = Class.create({
     this.request = new Ajax.Request('/stream', {
       method: 'get',
       parameters: {msgid: this.msgid, t: now.getTime() / 1000},
+      on401: this.gotoLogin,
       onException: this.handleException.bind(this),
       onInteractive: this.handleUpdate.bind(this),
       onComplete: this.handleComplete.bind(this)
@@ -10433,6 +10479,7 @@ Alice.Connection = Class.create({
     new Ajax.Request('/say', {
       method: 'post',
       parameters: {source: windowId, msg: "/create " + title},
+      on401: this.gotoLogin,
       onSuccess: function (transport) {
         this.handleUpdate(transport);
         if (message) {
@@ -10447,6 +10494,7 @@ Alice.Connection = Class.create({
   closeWindow: function(win) {
     new Ajax.Request('/say', {
       method: 'post',
+      on401: this.gotoLogin,
       parameters: {source: win.id, msg: "/close"}
     });
   },
@@ -10454,6 +10502,7 @@ Alice.Connection = Class.create({
   getConfig: function(callback) {
     new Ajax.Request('/config', {
       method: 'get',
+      on401: this.gotoLogin,
       onSuccess: callback
     });
   },
@@ -10461,6 +10510,7 @@ Alice.Connection = Class.create({
   getPrefs: function(callback) {
     new Ajax.Request('/prefs', {
       method: 'get',
+      on401: this.gotoLogin,
       onSuccess: callback
     });
   },
@@ -10468,6 +10518,7 @@ Alice.Connection = Class.create({
   getLog: function(callback) {
     new Ajax.Request('/logs', {
       method: 'get',
+      on401: this.gotoLogin,
       onSuccess: callback
     });
   },
@@ -10476,6 +10527,7 @@ Alice.Connection = Class.create({
     new Ajax.Request('/say', {
       method: 'post',
       parameters: form.serialize(),
+      on401: this.gotoLogin,
       onException: function (request, exception) {
         alert("There was an error sending a message.");
       }
@@ -10485,12 +10537,14 @@ Alice.Connection = Class.create({
   sendTabOrder: function (windows) {
     new Ajax.Request('/tabs', {
       method: 'post',
+      on401: this.gotoLogin,
       parameters: {tabs: windows}
     });
   },
 
   sendPing: function() {
     new Ajax.Request('/ping');
+    on401: this.gotoLogin
   }
 });
 Alice.Window = Class.create({
@@ -10741,6 +10795,9 @@ Alice.Window = Class.create({
       if (prev && prev.hasClassName("avatar") && !prev.hasClassName("consecutive")) {
         prev.down('div.msg').setStyle({minHeight: '0px'});
       }
+      if (prev && prev.hasClassName("monospace")) {
+        prev.down('div.msg').setStyle({paddingBottom: '0px'});
+      }
     }
 
     if (message.event == "say") {
@@ -10940,6 +10997,7 @@ Alice.Input = Class.create({
     this.window = win;
     this.application = this.window.application;
     this.textarea = $(element);
+    this.disabled = false;
 
     if (this.canContentEditable()) {
       this.editor = WysiHat.Editor.attach(this.textarea);
@@ -11011,6 +11069,8 @@ Alice.Input = Class.create({
   },
 
   focus: function(force) {
+    if (this.disabled) return;
+
     if (!force) {
       if (this.focused) return;
 
@@ -11078,6 +11138,7 @@ Alice.Input = Class.create({
   },
 
   completeNickname: function() {
+    if (this.disabled) return;
     if (!this.completion) {
       this.completion = new Alice.Completion(this.window.getNicknames());
     }
@@ -11197,6 +11258,7 @@ Alice.Keyboard = Class.create({
     this.shortcut("Cmd+Shift+J");
     this.shortcut("Cmd+Shift+K");
     this.shortcut("Cmd+Shift+H");
+    this.shortcut("Cmd+U");
     this.shortcut("Enter");
     this.shortcut("Esc");
     this.shortcut("Tab");
@@ -11244,6 +11306,10 @@ Alice.Keyboard = Class.create({
   onCmdK: function() {
     this.activeWindow.messages.down("ul").update("");
     this.activeWindow.lastNick = "";
+  },
+
+  onCmdU: function() {
+    this.application.nextUnreadWindow();
   },
 
   onCmdShiftM: function() {
@@ -11448,6 +11514,10 @@ if (window == window.parent) {
 
     $$('ul.messages li.avatar:not(.consecutive) + li.consecutive').each(function (li) {
       li.previous().down('div.msg').setStyle({minHeight:'0px'});
+    });
+
+    $$('ul.messages li.monospace + li.monospace.consecutive').each(function(li) {
+      li.previous().down('div.msg').setStyle({paddingBottom:'0px'});
     });
 
     $$('span.timestamp').each(function(elem) {

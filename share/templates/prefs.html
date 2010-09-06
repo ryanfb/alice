@@ -2,6 +2,10 @@
 
 <div id="prefs" class="config">
   <form id="config_data" onsubmit="return Alice.prefs.submit(this)">
+    <table>
+      <tr>
+        <td>
+
     <div class="field" style="width:150px">
       <input type="checkbox"<? if ($app->config->images eq "show") { ?> checked<? } ?> name="images" id="images" />
       <label>Inline images?</label>
@@ -35,6 +39,9 @@
       </select>
     </div>
 
+      </td>
+      <td>
+
     <div class="field clear" style="width:150px">
       <label>Highlights</label>
       <select name="highlights" multiple="multiple" id="highlights">
@@ -47,6 +54,25 @@
         <a href="#" onclick="return Alice.prefs.removeHighlights()">Remove</a>
       </div>
     </div>
+
+
+
+    <div class="field clear" style="width:150px">
+      <label>Monospace Nicks</label>
+      <select name="monospace_nicks" multiple="multiple" id="monospace_nicks">
+        <? for my $nick (@{$app->config->monospace_nicks}) { ?>
+        <option value="<?= $nick ?>"><?= $nick ?></option>
+        <? } ?>
+      </select>
+      <div class="controls">
+        <a href="#" onclick="return Alice.prefs.addNick()">Add</a>
+        <a href="#" onclick="return Alice.prefs.removeNicks()">Remove</a>
+      </div>
+    </div>
+
+      </td>
+    </tr>
+  </table>
 
     <div class="buttons">
       <button type="submit">Save</button>

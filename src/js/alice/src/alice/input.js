@@ -4,6 +4,7 @@ Alice.Input = Class.create({
     this.window = win;
     this.application = this.window.application;
     this.textarea = $(element);
+    this.disabled = false;
 
     if (this.canContentEditable()) {
       this.editor = WysiHat.Editor.attach(this.textarea);
@@ -75,6 +76,8 @@ Alice.Input = Class.create({
   },
 
   focus: function(force) {
+    if (this.disabled) return;
+
     if (!force) {
       if (this.focused) return;
 
@@ -143,6 +146,7 @@ Alice.Input = Class.create({
   },
   
   completeNickname: function() {
+    if (this.disabled) return;
     if (!this.completion) {
       this.completion = new Alice.Completion(this.window.getNicknames());
     }

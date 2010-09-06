@@ -5,7 +5,6 @@ use App::Alice::Window;
 use App::Alice::InfoWindow;
 use App::Alice::HTTPD;
 use App::Alice::IRC;
-use App::Alice::Signal;
 use App::Alice::Config;
 use App::Alice::Logger;
 use App::Alice::History;
@@ -15,7 +14,7 @@ use Digest::MD5 qw/md5_hex/;
 use List::Util qw/first/;
 use Encode;
 
-our $VERSION = '0.18';
+our $VERSION = '0.19';
 
 has condvar => (
   is       => 'rw',
@@ -69,34 +68,7 @@ has commands => (
   isa     => 'App::Alice::Commands',
   lazy    => 1,
   default => sub {
-    App::Alice::Commands->new(app => shift);
-  }
-);
-
-has notifier => (
-  is      => 'ro',
-  lazy    => 1,
-  default => sub {
-    my $self = shift;
-    my $notifier;
-    eval {
-      if ($^O eq 'darwin') {
-        # 5.10 doesn't seem to put Extras in @INC
-        # need this for Foundation.pm
-        if ($] >= 5.01 and -e "/System/Library/Perl/Extras/5.10.0") {
-          require lib;
-          lib->import("/System/Library/Perl/Extras/5.10.0"); 
-        }
-        require App::Alice::Notifier::Growl;
-        $notifier = App::Alice::Notifier::Growl->new;
-      }
-      elsif ($^O eq 'linux') {
-        require App::Alice::Notifier::LibNotify;
-        $notifier = App::Alice::Notifier::LibNotify->new;
-      }
-    };
-    $self->log(info => "Notifications disabled") unless $notifier;
-    return $notifier;
+    App::Alice::Commands->new(commands_file => $_[0]->config->assetdir."/commands.pl");
   }
 );
 
@@ -191,7 +163,7 @@ has 'user' => (
 sub BUILDARGS {
   my ($class, %options) = @_;
   my $self = {standalone => 1};
-  for (qw/standalone history notifier template user/) {
+  for (qw/standalone commands history template user/) {
     if (exists $options{$_}) {
       $self->{$_} = $options{$_};
       delete $options{$_};
@@ -212,7 +184,6 @@ sub run {
   $self->info_window;
   $self->template;
   $self->httpd;
-  $self->notifier;
 
   print STDERR "Location: http://".$self->config->http_address.":".$self->config->http_port."/\n"
     if $self->standalone;
@@ -226,17 +197,26 @@ sub run {
     for my $sig (qw/INT QUIT/) {
       my $w = AnyEvent->signal(
         signal => $sig,
-        cb     => sub {App::Alice::Signal->new(app => $self, type => $sig)}
+        cb     => sub {$self->init_shutdown},
       );
       push @sigs, $w;
     }
 
-    $self->condvar->recv;
+    my $args = $self->condvar->recv;
+    $self->_init_shutdown(@$args);
   }
 }
 
 sub init_shutdown {
   my ($self, $cb, $msg) = @_;
+  $self->standalone ? $self->condvar->send([$cb, $msg]) : $self->_init_shutdown($cb, $msg);
+}
+
+sub _init_shutdown {
+  my ($self, $cb, $msg) = @_;
+
+  $self->condvar(AE::cv) if $self->standalone;
+
   $self->{on_shutdown} = $cb;
   $self->shutting_down(1);
   $self->history(undef);
@@ -244,31 +224,53 @@ sub init_shutdown {
   if ($self->connected_ircs) {
     print STDERR "\nDisconnecting, please wait\n" if $self->standalone;
     $_->init_shutdown($msg) for $self->connected_ircs;
+
+    $self->{shutdown_timer} = AnyEvent->timer(
+      after => 3,
+      cb    => sub{$self->shutdown}
+    );
   }
   else {
     print "\n";
     $self->shutdown;
-    return;
   }
-  $self->{shutdown_timer} = AnyEvent->timer(
-    after => 3,
-    cb    => sub{$self->shutdown}
-  );
+
+  if ($self->standalone) {
+    $self->condvar->recv;
+    $self->_shutdown;
+  }
 }
 
 sub shutdown {
   my $self = shift;
+  $self->standalone ? $self->condvar->send : $self->_shutdown;
+}
+
+sub _shutdown {
+  my $self = shift;
+
   $self->_ircs([]);
   $self->httpd->shutdown;
-  $_->buffer->clear for $self->windows;
+  
+  if ($self->standalone) {
+    my $cv = AE::cv;
+    for ($self->windows) {
+      $cv->begin;
+      $_->buffer->clear(sub {$cv->end});
+    }
+    $cv->recv;
+  }
+  else {
+    $_->buffer->clear(sub{}) for $self->windows;
+  }
+
   delete $self->{shutdown_timer} if $self->{shutdown_timer};
   $self->{on_shutdown}->() if $self->{on_shutdown};
-  $self->condvar->send if $self->condvar;
 }
 
 sub handle_command {
   my ($self, $command, $window) = @_;
-  $self->commands->handle($command, $window);
+  $self->commands->handle($self, $command, $window);
 }
 
 sub reload_commands {
@@ -431,13 +433,6 @@ sub broadcast {
                   grep {$_->{highlight}} @messages;
   
   $self->httpd->broadcast(@messages);
-  
-  if ($self->config->alerts and $self->notifier and ! $self->httpd->stream_count) {
-    for my $message (@messages) {
-      next if !$message->{window} or $message->{window}{type} eq "info";
-      $self->notifier->display($message) if $message->{highlight};
-    }
-  }
 }
 
 sub render {

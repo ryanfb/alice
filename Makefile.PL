@@ -24,7 +24,6 @@ test_requires 'Test::More' => '0.86';
 test_requires 'Test::TCP' => '0';
 install_share 'share';
 install_script 'bin/alice';
-no_index 'directory' => 'share/sprockets';
 
 postamble q{
 BUILD := share/static
@@ -43,7 +42,7 @@ SITE_JS := $(BUILD)/alice.js
 COLORFILES := $(foreach dir,$(CSS_SOURCE)/colors,$(wildcard $(dir)/*.scss))
 CSSFILES := $(addprefix $(BUILD)/alice-,$(notdir $(COLORFILES:.scss=.css)))
 
-$(BUILD)/alice-%.css: $(CSS_SOURCE)/colors/%.scss
+$(BUILD)/alice-%.css: $(CSS_SOURCE)/colors/%.scss $(ALICE_SCSS)
 	cat $< $(ALICE_SCSS) | sass --scss -s $@
 
 assets: stylesheets javascript

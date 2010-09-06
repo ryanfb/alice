@@ -8,12 +8,9 @@ use Plack::Request;
 use Plack::Builder;
 use Plack::Middleware::Static;
 use Plack::Session::Store::File;
-
 use IRC::Formatting::HTML qw/html_to_irc/;
-
 use App::Alice::Stream;
 use App::Alice::Commands;
-
 use JSON;
 use Encode;
 use utf8;
@@ -29,29 +26,24 @@ has 'app' => (
 has 'httpd' => (is  => 'rw');
 has 'ping_timer' => (is  => 'rw');
 
-has 'config' => (
-  is => 'ro',
-  isa => 'App::Alice::Config',
-  lazy => 1,
-  default => sub {shift->app->config},
-);
+sub config {$_[0]->app->config}
 
 my $url_handlers = [
-  [ qr{^/$}               => \&send_index ],
-  [ qr{^/say/?$}          => \&handle_message ],
-  [ qr{^/stream/?$}       => \&setup_stream ],
-  [ qr{^/config/?$}       => \&send_config ],
-  [ qr{^/prefs/?$}        => \&send_prefs ],
-  [ qr{^/serverconfig/?$} => \&server_config ],
-  [ qr{^/save/?$}         => \&save_config ],
-  [ qr{^/tabs/?$}         => \&tab_order ],
-  [ qr{^/login/?$}        => \&login ],
-  [ qr{^/logout/?$}       => \&logout ],
-  [ qr{^/logs/?$}         => \&send_logs ],
-  [ qr{^/search/?$}       => \&send_search ],
-  [ qr{^/range/?$}        => \&send_range ],
-  [ qr{^/view/?$}         => \&send_index ],
-  [ qr{^/get}             => \&image_proxy ],
+  [ ""             => "send_index" ],
+  [ "say"          => "handle_message" ],
+  [ "stream"       => "setup_stream" ],
+  [ "config"       => "send_config" ],
+  [ "prefs"        => "send_prefs" ],
+  [ "serverconfig" => "server_config" ],
+  [ "save"         => "save_config" ],
+  [ "tabs"         => "tab_order" ],
+  [ "login"        => "login" ],
+  [ "logout"       => "logout" ],
+  [ "logs"         => "send_logs" ],
+  [ "search"       => "send_search" ],
+  [ "range"        => "send_range" ],
+  [ "view"         => "send_index" ],
+  [ "get"          => "image_proxy" ],
 ];
 
 sub url_handlers { return $url_handlers }
@@ -96,14 +88,20 @@ sub dispatch {
   if ($self->app->auth_enabled) {
     unless ($req->path eq "/login" or $self->is_logged_in($req)) {
       my $res = $req->new_response;
-      $res->redirect("/login");
+      if ($req->path eq "/") {
+        $res->redirect("/login");
+      } else {
+        $res->status(401);
+        $res->body("unauthorized");
+      }
       return $res->finalize;
     }
   }
   for my $handler (@{$self->url_handlers}) {
-    my $re = $handler->[0];
-    if ($req->path_info =~ /$re/) {
-      return $handler->[1]->($self, $req);
+    my $path = $handler->[0];
+    if ($req->path_info =~ /^\/$path\/?$/) {
+      my $method = $handler->[1];
+      return $self->$method($req);
     }
   }
   return $self->not_found($req);
@@ -140,6 +138,7 @@ sub login {
 
 sub logout {
   my ($self, $req) = @_;
+  $_->close for $self->streams;
   my $res = $req->new_response;
   if (!$self->app->auth_enabled) {
     $res->redirect("/");
@@ -247,7 +246,7 @@ sub handle_message {
   if ($window) {
     for (split /\n/, $msg) {
       try {
-        $self->app->handle_command($_, $window) if length $_
+        $self->app->handle_command($_, $window) if length $_;
       } catch {
         $self->app->log(info => $_);
       }
@@ -262,12 +261,13 @@ sub handle_message {
 
 sub send_index {
   my ($self, $req) = @_;
+  my $options = $self->merged_options($req);
   return sub {
     my $respond = shift;
     my $writer = $respond->([200, ["Content-type" => "text/html; charset=utf-8"]]);
     my @windows = $self->app->sorted_windows;
     @windows > 1 ? $windows[1]->{active} = 1 : $windows[0]->{active} = 1;
-    $writer->write(encode_utf8 $self->app->render('index_head', @windows));
+    $writer->write(encode_utf8 $self->app->render('index_head', $options, @windows));
     $self->send_windows($writer, sub {
       $writer->write(encode_utf8 $self->app->render('index_footer', @windows));
       $writer->close;
@@ -276,22 +276,34 @@ sub send_index {
   }
 }
 
+sub merged_options {
+  my ($self, $req) = @_;
+  my $config = $self->app->config;
+  my $params = $req->parameters;
+  my %options = (
+   images => $params->{images} || ($config->images ? 'show' : 'hide'),
+   debug  => $params->{debug}  || ($config->show_debug ? 'true' : 'false'),
+   timeformat => $params->{timeformat} || $config->timeformat,
+  );
+  join "&", map {"$_=$options{$_}"} keys %options;
+}
+
 sub send_windows {
   my ($self, $writer, $cb, @windows) = @_;
   if (!@windows) {
     $cb->();
+    return;
   }
-  else {
-    my $window = pop @windows;
-    $writer->write(encode_utf8 $self->app->render('window_head', $window));
-    $window->buffer->with_messages(sub {
-      my @messages = @_;
-      $writer->write(encode_utf8 $_->{html}) for @messages;
-    }, 0, sub {
-      $writer->write(encode_utf8 $self->app->render('window_footer', $window));
-      $self->send_windows($writer, $cb, @windows);
-    });
-  }    
+
+  my $window = pop @windows;
+  $writer->write(encode_utf8 $self->app->render('window_head', $window));
+  $window->buffer->with_messages(sub {
+    my @messages = @_;
+    $writer->write(encode_utf8 $_->{html}) for @messages;
+  }, 0, sub {
+    $writer->write(encode_utf8 $self->app->render('window_footer', $window));
+    $self->send_windows($writer, $cb, @windows);
+  });
 }
 
 sub send_logs {
@@ -378,15 +390,15 @@ sub save_config {
   for my $name (keys %{$req->parameters}) {
     next unless $req->parameters->{$name};
     next if $name eq "has_servers";
-    if ($name =~ /^(.+?)_(.+)/ and exists $new_config->{servers}) {
+    if ($name eq "highlights" or $name eq "monospace_nicks") {
+      $new_config->{$name} = [$req->parameters->get_all($name)];
+    }
+    elsif ($name =~ /^(.+?)_(.+)/ and exists $new_config->{servers}) {
       if ($2 eq "channels" or $2 eq "on_connect") {
         $new_config->{servers}{$1}{$2} = [$req->parameters->get_all($name)];
       } else {
         $new_config->{servers}{$1}{$2} = $req->param($name);
       }
-    }
-    elsif ($name eq "highlights") {
-      $new_config->{$name} = [$req->parameters->get_all($name)];
     }
     else {
       $new_config->{$name} = $req->param($name);
